@@ -115,7 +115,7 @@ while($loginSucceed -ne "true")
 	$passWord = Read-Host -Prompt 'Input Password'
 	$dbExist = CheckExist $sqlFile $logFile $SqlServer $localServer $dbName $userName $passWord "does not exist"
 }	
-write-host "The database exists. We recommend that you have an empty database, otherwise the same tables will be wiped off " -ForegroundColor Yellow		
+write-host "The database exists. We recommend that you have an empty database, otherwise the same tables and other same database objects for this demo will be wiped off " -ForegroundColor Yellow		
 
 #create database objects
 $logFile = $path + "\MRSSqlDB_creation.log"	
@@ -162,7 +162,21 @@ $sqlFile = $PSScriptRoot + "\src\sql\MRSSqlDB_create_job.sql"
 $logFile = $path + "\MRSSqlDB_create_job.log"	
 
 write-host "Scheduling jobs for data simulator which will run every 15 minutes to generate Demand data and run hourly to generate Temperature data from seed data ..." -ForegroundColor white	
-sqlcmd -S $SqlServer -U $userName -P $passWord -i $sqlFile -v Servername='$SqlServer' DBName=$dbName Username=$userName Pswd=$passWord -o $logFile  	
+write-host $SqlServer
+if($SqlServer.contains(","))
+{
+	$server = ($SqlServer.Split(","))[0]
+	$port = ($SqlServer.Split(","))[1]
+	write-host $server	
+	write-host $port
+	sqlcmd -S $SqlServer -U $userName -P $passWord -i $sqlFile -v Servername = $server -v Port =$port -v DBName = $dbName -v Username = $userName -v Pswd = $passWord -o $logFile  	
+}
+else
+{
+	$server = $SqlServer
+	$port = ""
+	sqlcmd -S $SqlServer -U $userName -P $passWord -i $sqlFile -v Servername = $server -v Port =$port -v DBName = $dbName -v Username = $userName -v Pswd = $passWord -o $logFile  	
+}
 
 $setupDate = ((get-date).ToUniversalTime()).ToString("yyyy-MM-dd HH:mm:ss")
 Write-Host "Deploy Completed Date = $setupDate" -ForegroundColor Green
