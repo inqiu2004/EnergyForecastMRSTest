@@ -133,6 +133,10 @@ CREATE TABLE [dbo].[DemandForecast] (
 );
 go
 
+IF OBJECT_ID('dbo.InputAllFeatures', 'U') IS NOT NULL
+  DROP TABLE [dbo].[InputAllFeatures]
+GO
+
 CREATE TABLE InputAllFeatures(
    utcTimestamp datetime,
    region varchar(64),
@@ -623,7 +627,7 @@ BEGIN
 		WHILE @@FETCH_STATUS = 0
 		BEGIN
 			set @jobid=NULL
-			set @jobName = concat(@dbname,'_',N'prediction_job','_',@region)
+			set @jobName = concat(upper(@dbname),'_',N'prediction_job','_',@region)
 			SELECT @jobId = job_id FROM msdb.dbo.sysjobs WHERE (name = @jobName)
 			IF (@jobId IS NOT NULL)
 			BEGIN
@@ -648,7 +652,7 @@ Begin
 	DECLARE @jobName NVARCHAR(64)
 	DECLARE @jobId BINARY(16)
 	Set @jobid = NULL
-	set @jobName = concat(@dbname,'_',N'Energy_Demand_data_simulator')
+	set @jobName = concat(upper(@dbname),'_',N'Energy_Demand_data_simulator')
 	EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=@jobName, 
 			@description=N'Simulator for generating energy demand data in every 15 minutes', 
 			@job_id = @jobId OUTPUT
@@ -679,7 +683,7 @@ Begin
 	IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
 
 	set @jobid=NULL
-	set @jobName = concat(@dbname,'_',N'Energy_Temperature_data_simulator')
+	set @jobName = concat(upper(@dbname),'_',N'Energy_Temperature_data_simulator')
 	EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=@jobName, 
 			@description=N'Simulator for generating energy demand data in every 15 minutes', 
 			@job_id = @jobId OUTPUT
@@ -724,7 +728,7 @@ Begin
 		WHILE @@FETCH_STATUS = 0
 		BEGIN
 			Set @jobid = NULL
-			set @jobName = concat(@dbname,'_',N'prediction_job','_',@region)
+			set @jobName = concat(upper(@dbname),'_',N'prediction_job','_',@region)
 			SET @sp = N'exec [dbo].[usp_energyDemandForecastMain] ''' + @region  + ''', ''' + @servername  + ''', ''' + @dbname  + ''', ''' + @username  + ''', ''' +@pswd  + '''';
 			print @sp
 			EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=@jobName, 
