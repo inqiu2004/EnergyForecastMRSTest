@@ -123,7 +123,7 @@ $logFile = $path + "\MRSSqlDB_creation.log"
 write-host "creating tables and other database objects ..." -ForegroundColor white		
 
 $sqlFile = $PSScriptRoot + "\src\sql\MRSSqlDB_creation.sql"	
-sqlcmd -S $SqlServer -U $userName -P $passWord -i $sqlFile -v DBName=$dbName -o $logFile  	
+sqlcmd.exe -S $SqlServer -U $userName -P $passWord -i $sqlFile -v DBName=$dbName -o $logFile  	
 
 $wordExist1 = CheckStringInFile $logFile "Cannot drop"
 $wordExist2 = CheckStringInFile $logFile "already an object named"
@@ -144,8 +144,8 @@ $demandSeedFile = $PSScriptRoot + "\src\seeddata\DemandHistory15Minutes.txt"
 $temperatureSeedFile = $PSScriptRoot + "\src\seeddata\TemperatureHistoryHourly.txt"	
 
 write-host "Bulk loading seed data into tables..." -ForegroundColor white	
-bcp $DBtableDemand IN $demandSeedFile -S $SqlServer -U $userName -P $passWord -c -h TABLOCK -b 100000 2>&1 3>&1 4>&1 1>>$global:logfile
-bcp $DBtableTemperature IN $temperatureSeedFile -S $SqlServer -U $userName -P $passWord -c -h TABLOCK -b 100000 2>&1 3>&1 4>&1 1>>$global:logfile
+bcp.exe $DBtableDemand IN $demandSeedFile -S $SqlServer -U $userName -P $passWord -c -h TABLOCK -b 100000 2>&1 3>&1 4>&1 1>>$global:logfile
+bcp.exe $DBtableTemperature IN $temperatureSeedFile -S $SqlServer -U $userName -P $passWord -c -h TABLOCK -b 100000 2>&1 3>&1 4>&1 1>>$global:logfile
 
 write-host "Successfully loaded seed data into tables" -ForegroundColor Green	
 
@@ -154,7 +154,7 @@ write-host "Generating historical data from seed data ..." -ForegroundColor whit
 $sqlFile = $PSScriptRoot + "\src\sql\MRSSqlDB_GenerateHistorialData.sql"
 $logFile = $path + "\MRSSqlDB_GenerateHistorialData.log"
 
-sqlcmd -S $SqlServer -U $userName -P $passWord  -i $sqlFile -v DBName=$dbName -o $logFile  	
+sqlcmd.exe -S $SqlServer -U $userName -P $passWord  -i $sqlFile -v DBName=$dbName -o $logFile  	
 write-host "Successfully generated historical data" -ForegroundColor Green	
 
 #create sql schedule job
@@ -162,20 +162,17 @@ $sqlFile = $PSScriptRoot + "\src\sql\MRSSqlDB_create_job.sql"
 $logFile = $path + "\MRSSqlDB_create_job.log"	
 
 write-host "Scheduling jobs for data simulator which will run every 15 minutes to generate Demand data and run hourly to generate Temperature data from seed data ..." -ForegroundColor white	
-write-host $SqlServer
 if($SqlServer.contains(","))
 {
 	$server = ($SqlServer.Split(","))[0]
 	$port = ($SqlServer.Split(","))[1]
-	write-host $server	
-	write-host $port
-	sqlcmd -S $SqlServer -U $userName -P $passWord -i $sqlFile -v Servername = $server -v Port =$port -v DBName = $dbName -v Username = $userName -v Pswd = $passWord -o $logFile  	
+	sqlcmd.exe -S $SqlServer -U $userName -P $passWord -i $sqlFile -v Servername = $server -v Port =$port -v DBName = $dbName -v Username = $userName -v Pswd = $passWord -o $logFile  	
 }
 else
 {
 	$server = $SqlServer
 	$port = ""
-	sqlcmd -S $SqlServer -U $userName -P $passWord -i $sqlFile -v Servername = $server -v Port =$port -v DBName = $dbName -v Username = $userName -v Pswd = $passWord -o $logFile  	
+	sqlcmd.exe -S $SqlServer -U $userName -P $passWord -i $sqlFile -v Servername = $server -v Port =$port -v DBName = $dbName -v Username = $userName -v Pswd = $passWord -o $logFile  	
 }
 
 $setupDate = ((get-date).ToUniversalTime()).ToString("yyyy-MM-dd HH:mm:ss")
