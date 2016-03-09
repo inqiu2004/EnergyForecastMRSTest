@@ -59,6 +59,45 @@ IF OBJECT_ID('dbo.usp_energyDemandForecastMain', 'P') IS NOT NULL
   DROP PROCEDURE [dbo].[usp_energyDemandForecastMain]
 GO
 
+IF OBJECT_ID('dbo.RegionLookup', 'U') IS NOT NULL
+  DROP TABLE [dbo].[RegionLookup]
+GO
+
+CREATE TABLE [dbo].[RegionLookup] (
+    [region]      BIGINT         NOT NULL,
+    [Name]      NVARCHAR (MAX) NULL,
+    [Latitude]  FLOAT (53)     NULL,
+    [Longitude] FLOAT (53)     NULL,
+	CONSTRAINT [PK_RegionLookup] PRIMARY KEY CLUSTERED ( [region] ASC)
+);
+go
+
+IF OBJECT_ID('dbo.stepLookup', 'U') IS NOT NULL
+  DROP TABLE [dbo].[stepLookup]
+GO
+
+CREATE TABLE [dbo].[stepLookup] (
+	[step]			int				not null,
+	[step_name]		nvarchar(64)		NOT NULL,	
+	CONSTRAINT [PK_stepLookup] PRIMARY KEY CLUSTERED ( [step] ASC)	
+);
+go
+
+IF OBJECT_ID('dbo.runlogs', 'U') IS NOT NULL
+  DROP TABLE [dbo].[runlogs]
+GO
+
+CREATE TABLE [dbo].[runlogs] (
+	[step]			int				not null,
+	[utcTimestamp]	DATETIME		NOT NULL,
+    [region]      	NVARCHAR(64)     NOT NULL,
+	[runTimestamp]	datetime		not null,
+	[success_flag]		int,
+    [ErrorMessage]  		varchar (1000) 		NULL,	
+	CONSTRAINT [PK_runlogs] PRIMARY KEY CLUSTERED ( step asc, [utcTimestamp] ASC, [region] ASC, runTimestamp asc)	
+);
+go
+
 IF OBJECT_ID('dbo.DemandSeed', 'U') IS NOT NULL
   DROP TABLE [dbo].[DemandSeed]
 GO
@@ -66,7 +105,8 @@ GO
 CREATE TABLE [dbo].[DemandSeed] (
 	[utcTimestamp]	DATETIME		NOT NULL,
     [region]      	NVARCHAR(64)     NOT NULL,
-    [Load]  		FLOAT (53) 		NULL
+    [Load]  		FLOAT (53) 		NULL,
+    CONSTRAINT [PK_DemandSeed] PRIMARY KEY CLUSTERED ( [utcTimestamp] ASC, [region] ASC)	
 );
 go
 
@@ -78,7 +118,8 @@ CREATE TABLE [dbo].[TemperatureSeed] (
 	[utcTimestamp]	DATETIME		NOT NULL,
     [region]      	NVARCHAR(64)     NOT NULL,
     [Temperature]  	FLOAT (53) 		NULL,
-	[Flag]			INT				NOT NULL
+	[Flag]			INT				NOT NULL,
+    CONSTRAINT [PK_TemperatureSeed] PRIMARY KEY CLUSTERED ( [utcTimestamp] ASC, [region] ASC)	
 );
 go
 
@@ -338,120 +379,144 @@ BEGIN
 
 	delete InputAllFeatures where region=@region;
 
-	with TimeSequence as
-	(
-		Select cast(@scoreStartTime as datetime) as utcTimestamp
-			union all
-		Select dateadd(minute, 15, utcTimestamp)
-			from TimeSequence
-			where utcTimestamp < cast(@scoreEndTime as datetime)
-	),
-	e1(n) AS
-	(
-		SELECT 1 UNION ALL SELECT 1 UNION ALL SELECT 1 UNION ALL 
-		SELECT 1 UNION ALL SELECT 1 UNION ALL SELECT 1 UNION ALL 
-		SELECT 1 UNION ALL SELECT 1 UNION ALL SELECT 1 UNION ALL SELECT 1
-	), 
-	e2(n) AS (SELECT 1 FROM e1 CROSS JOIN e1 AS b), 
-	e3(n) AS (SELECT 1 FROM e2 CROSS JOIN e2 AS b), 
-	e4(n) AS (SELECT 1 FROM e3 CROSS JOIN (SELECT TOP 5 n FROM e1) AS b)
-	insert into @InputData 
-	select e.utcTimestamp as utcTimestamp, Load, temperature 
-	from 
-	(
-		SELECT CONVERT(varchar(50),DATEADD(minute, n, CONVERT(datetime,@startTime,120)),120) utcTimestamp
-			FROM
-			(
-			  SELECT ((ROW_NUMBER() OVER (ORDER BY n))-1)*15 n FROM e4
-			 ) as d
-		   where n<=@numTS
-	) as e
-	left join
-	(
-		select a.utcTimestamp as utcTimestamp, b.region, a.Load, b.temperature from (
-			select utcTimestamp,Load from dbo.DemandReal where region=@region and utcTimestamp>=@startTime and utcTimestamp<=@endTime
-				union all 
-				select convert(NVARCHAR(50),utcTimestamp,120) as utcTimestamp, NULL as Load from TimeSequence
+	BEGIN TRY
+		with TimeSequence as
+		(
+			Select cast(@scoreStartTime as datetime) as utcTimestamp
+				union all
+			Select dateadd(minute, 15, utcTimestamp)
+				from TimeSequence
+				where utcTimestamp < cast(@scoreEndTime as datetime)
+		),
+		e1(n) AS
+		(
+			SELECT 1 UNION ALL SELECT 1 UNION ALL SELECT 1 UNION ALL 
+			SELECT 1 UNION ALL SELECT 1 UNION ALL SELECT 1 UNION ALL 
+			SELECT 1 UNION ALL SELECT 1 UNION ALL SELECT 1 UNION ALL SELECT 1
+		), 
+		e2(n) AS (SELECT 1 FROM e1 CROSS JOIN e1 AS b), 
+		e3(n) AS (SELECT 1 FROM e2 CROSS JOIN e2 AS b), 
+		e4(n) AS (SELECT 1 FROM e3 CROSS JOIN (SELECT TOP 5 n FROM e1) AS b)
+		insert into @InputData 
+		select e.utcTimestamp as utcTimestamp, Load, temperature 
+		from 
+		(
+			SELECT CONVERT(varchar(50),DATEADD(minute, n, CONVERT(datetime,@startTime,120)),120) utcTimestamp
+				FROM
+				(
+				  SELECT ((ROW_NUMBER() OVER (ORDER BY n))-1)*15 n FROM e4
+				 ) as d
+			   where n<=@numTS
+		) as e
+		left join
+		(
+			select a.utcTimestamp as utcTimestamp, b.region, a.Load, b.temperature from (
+				select utcTimestamp,Load from dbo.DemandReal where region=@region and utcTimestamp>=@startTime and utcTimestamp<=@endTime
+					union all 
+					select convert(NVARCHAR(50),utcTimestamp,120) as utcTimestamp, NULL as Load from TimeSequence
+					) as a
+			right join 
+				(select utcTimestamp, region, temperature from dbo.TemperatureReal where region=@region and utcTimestamp>=@startTime and utcTimestamp<=@scoreEndTime
+					) as b 
+			on dateadd(hour, datediff(hour, 0, CAST(a.utcTimestamp as datetime)), 0)
+				= dateadd(hour, datediff(hour, 0, CAST(b.utcTimestamp as datetime)), 0) 
+		) as c
+		on e.utcTimestamp=c.utcTimestamp 
+		order by e.utcTimestamp;
+
+		DECLARE @avgLoad float;
+		DECLARE @avgTemp float;
+		SELECT @avgLoad=avg(Load), @avgTemp = avg(temperature) from @InputData;
+
+		Insert into @InputDataNAfilled
+		SELECT utcTimestamp,
+			(CASE WHEN Load is NULL and loadLag96 is NULL THEN @avgLoad
+				  WHEN Load is NULL and loadLag96 is not NULL THEN loadLag96
+				  ELSE Load END) as Load,
+			(CASE WHEN temperature is NULL and tempLag96 is NULL THEN @avgTemp
+				  WHEN temperature is NULL and tempLag96 is not NULL THEN tempLag96
+				  ELSE temperature END) as temperature
+		from 
+		(SELECT utcTimestamp,Load,temperature,
+			LAG(Load,96,NULL) OVER (ORDER BY utcTimestamp) as loadLag96,
+			LAG(temperature,96,NULL) OVER (ORDER BY utcTimestamp) as tempLag96 
+		from @InputData) as a
+		order by utcTimestamp
+
+		Insert INTO InputAllFeatures
+		SELECT 
+			utcTimestamp,@region, Load,temperature,
+			LAG(Load,24,NULL) OVER (ORDER BY utcTimestamp) as lag24,
+			LAG(Load,25,NULL) OVER (ORDER BY utcTimestamp) as lag25,
+			LAG(Load,26,NULL) OVER (ORDER BY utcTimestamp) as lag26,
+			LAG(Load,27,NULL) OVER (ORDER BY utcTimestamp) as lag27,
+			LAG(Load,28,NULL) OVER (ORDER BY utcTimestamp) as lag28,
+			LAG(Load,31,NULL) OVER (ORDER BY utcTimestamp) as lag31,
+			LAG(Load,36,NULL) OVER (ORDER BY utcTimestamp) as lag36,
+			LAG(Load,40,NULL) OVER (ORDER BY utcTimestamp) as lag40,
+			LAG(Load,48,NULL) OVER (ORDER BY utcTimestamp) as lag48,
+			LAG(Load,72,NULL) OVER (ORDER BY utcTimestamp) as lag72,
+			LAG(Load,96,NULL) OVER (ORDER BY utcTimestamp) as lag96,
+			hourofday, dayinweek, monofyear, weekend,
+			(case when hourofday<=18 and hourofday>=8 then 1 else 0 end) as businesstime,
+			(case when hourofday>=5 and hourofday<=8 then 1 else 0 end) as ismorning,
+			t/365.25 as LinearTrend,
+			cos(t*2*pi()/365.25)*weekend as WKFreqCos1,
+			sin(t*2*pi()/365.25)*weekend as WKFreqSin1,
+			cos(t*2*pi()/365.25)*(1-weekend) as WDFreqCos1,
+			sin(t*2*pi()/365.25)*(1-weekend) as WDFreqSin1,
+			cos(t*2*pi()*2/365.25)*weekend as WKFreqCos2,
+			sin(t*2*pi()*2/365.25)*weekend as WKFreqSin2,
+			cos(t*2*pi()*2/365.25)*(1-weekend) as WDFreqCos2,
+			sin(t*2*pi()*2/365.25)*(1-weekend) as WDFreqSin2
+		 from (
+			select 	utcTimestamp,Load,temperature,
+					datepart(hour, utcTimestamp) as hourofday, 
+					datepart(weekday, utcTimestamp) as dayinweek, 
+					datepart(month, utcTimestamp) as monofyear,
+					(case when datepart(weekday, utcTimestamp) in (1,7) then 1 else 0 end) as weekend,
+					floor((convert(float, ROW_NUMBER() OVER (ORDER BY utcTimestamp))-1)/24) as t			
+			from (
+				select convert(datetime,utcTimestamp,120) as utcTimestamp,Load,temperature 
+				from @InputDataNAfilled
 				) as a
-		right join 
-			(select utcTimestamp, region, temperature from dbo.TemperatureReal where region=@region and utcTimestamp>=@startTime and utcTimestamp<=@scoreEndTime
-				) as b 
-		on dateadd(hour, datediff(hour, 0, CAST(a.utcTimestamp as datetime)), 0)
-			= dateadd(hour, datediff(hour, 0, CAST(b.utcTimestamp as datetime)), 0) 
-	) as c
-	on e.utcTimestamp=c.utcTimestamp 
-	order by e.utcTimestamp;
-
-	DECLARE @avgLoad float;
-	DECLARE @avgTemp float;
-	SELECT @avgLoad=avg(Load), @avgTemp = avg(temperature) from @InputData;
-
-	Insert into @InputDataNAfilled
-	SELECT utcTimestamp,
-		(CASE WHEN Load is NULL and loadLag96 is NULL THEN @avgLoad
-			  WHEN Load is NULL and loadLag96 is not NULL THEN loadLag96
-			  ELSE Load END) as Load,
-		(CASE WHEN temperature is NULL and tempLag96 is NULL THEN @avgTemp
-			  WHEN temperature is NULL and tempLag96 is not NULL THEN tempLag96
-			  ELSE temperature END) as temperature
-	from 
-	(SELECT utcTimestamp,Load,temperature,
-		LAG(Load,96,NULL) OVER (ORDER BY utcTimestamp) as loadLag96,
-		LAG(temperature,96,NULL) OVER (ORDER BY utcTimestamp) as tempLag96 
-	from @InputData) as a
-	order by utcTimestamp
-
-	Insert INTO InputAllFeatures
-	SELECT 
-		utcTimestamp,@region, Load,temperature,
-		LAG(Load,24,NULL) OVER (ORDER BY utcTimestamp) as lag24,
-		LAG(Load,25,NULL) OVER (ORDER BY utcTimestamp) as lag25,
-		LAG(Load,26,NULL) OVER (ORDER BY utcTimestamp) as lag26,
-		LAG(Load,27,NULL) OVER (ORDER BY utcTimestamp) as lag27,
-		LAG(Load,28,NULL) OVER (ORDER BY utcTimestamp) as lag28,
-		LAG(Load,31,NULL) OVER (ORDER BY utcTimestamp) as lag31,
-		LAG(Load,36,NULL) OVER (ORDER BY utcTimestamp) as lag36,
-		LAG(Load,40,NULL) OVER (ORDER BY utcTimestamp) as lag40,
-		LAG(Load,48,NULL) OVER (ORDER BY utcTimestamp) as lag48,
-		LAG(Load,72,NULL) OVER (ORDER BY utcTimestamp) as lag72,
-		LAG(Load,96,NULL) OVER (ORDER BY utcTimestamp) as lag96,
-		hourofday, dayinweek, monofyear, weekend,
-		(case when hourofday<=18 and hourofday>=8 then 1 else 0 end) as businesstime,
-		(case when hourofday>=5 and hourofday<=8 then 1 else 0 end) as ismorning,
-		t/365.25 as LinearTrend,
-		cos(t*2*pi()/365.25)*weekend as WKFreqCos1,
-		sin(t*2*pi()/365.25)*weekend as WKFreqSin1,
-		cos(t*2*pi()/365.25)*(1-weekend) as WDFreqCos1,
-		sin(t*2*pi()/365.25)*(1-weekend) as WDFreqSin1,
-		cos(t*2*pi()*2/365.25)*weekend as WKFreqCos2,
-		sin(t*2*pi()*2/365.25)*weekend as WKFreqSin2,
-		cos(t*2*pi()*2/365.25)*(1-weekend) as WDFreqCos2,
-		sin(t*2*pi()*2/365.25)*(1-weekend) as WDFreqSin2
-	 from (
-		select 	utcTimestamp,Load,temperature,
-				datepart(hour, utcTimestamp) as hourofday, 
-				datepart(weekday, utcTimestamp) as dayinweek, 
-				datepart(month, utcTimestamp) as monofyear,
-				(case when datepart(weekday, utcTimestamp) in (1,7) then 1 else 0 end) as weekend,
-				floor((convert(float, ROW_NUMBER() OVER (ORDER BY utcTimestamp))-1)/24) as t			
-		from (
-			select convert(datetime,utcTimestamp,120) as utcTimestamp,Load,temperature 
-			from @InputDataNAfilled
-			) as a
-	) as b;
+		) as b;
+		
+		merge runlogs a 
+		using (select 1 as step, @scoreStartTime as utcTimeStamp, @region as region, getutcdate() as runtimestamp, 0 as success_flag, '' as errMsg) b
+		on a.step = b.step and a.utcTimeStamp = b.utcTimeStamp and a.region=b.region and a.runTimestamp = b.runTimestamp
+		when matched then
+			update set ErrorMessage = b.errMsg, success_flag = b.success_flag
+		WHEN NOT MATCHED THEN	
+			insert (step,utcTimeStamp,region, runTimestamp,success_flag,errorMessage)
+			values (b.step,b.utcTimeStamp,b.region, b.runTimestamp,b.success_flag,b.errMsg);	
+	END TRY
+	BEGIN CATCH
+		merge runlogs a 
+		using (select 1 as step, @scoreStartTime as utcTimeStamp, @region as region, getutcdate() as runtimestamp, -1 as success_flag, ERROR_MESSAGE() as errMsg) b
+		on a.step = b.step and a.utcTimeStamp = b.utcTimeStamp and a.region=b.region and a.runTimestamp = b.runTimestamp
+		when matched then
+			update set ErrorMessage = b.errMsg, success_flag = b.success_flag
+		WHEN NOT MATCHED THEN	
+			insert (step,utcTimeStamp,region, runTimestamp,success_flag,errorMessage)
+			values (b.step,b.utcTimeStamp,b.region, b.runTimestamp,b.success_flag,b.errMsg);
+	END CATCH;	
 END;
 GO
 
 -- stored procedure for model training
 CREATE PROCEDURE [dbo].[usp_trainModel] 
 	@queryStr nvarchar(max),
+	@region VARCHAR(10),	
+	@scoreStartTime VARCHAR(50),	
 	@server varchar(255),
 	@database varchar(255),
 	@user varchar(255),
 	@pwd varchar(255)
 AS
 BEGIN
-	EXEC sp_execute_external_script @language = N'R',
+	BEGIN TRY
+		EXEC sp_execute_external_script @language = N'R',
 								  @script = N'
 									sqlConnString <- paste("Driver=SQL Server;Server=",serverName,";Database=",dbName,";Uid=",user,";Pwd=",password,sep="")
 									sqlShareDir <- paste("c:\\AllShare\\", Sys.getenv("USERNAME"), sep="")
@@ -488,6 +553,26 @@ BEGIN
 								  @user = @user,
 								  @password=@pwd
 								  WITH RESULT SETS ((model varbinary(max)));
+								  
+		MERGE runlogs a 
+		using (select 2 as step, @scoreStartTime as utcTimeStamp, @region as region, getutcdate() as runtimestamp, 0 as success_flag, '' as errMsg) b
+		on a.step = b.step and a.utcTimeStamp = b.utcTimeStamp and a.region=b.region and a.runTimestamp = b.runTimestamp
+		when matched then
+			update set ErrorMessage = b.errMsg, success_flag = b.success_flag
+		WHEN NOT MATCHED THEN	
+			insert (step,utcTimeStamp,region, runTimestamp,success_flag,errorMessage)
+			values (b.step,b.utcTimeStamp,b.region, b.runTimestamp,b.success_flag,b.errMsg);	
+	END TRY
+	BEGIN CATCH
+		merge runlogs a 
+		using (select 2 as step, @scoreStartTime as utcTimeStamp, @region as region, getutcdate() as runtimestamp, -1 as success_flag, ERROR_MESSAGE() as errMsg) b
+		on a.step = b.step and a.utcTimeStamp = b.utcTimeStamp and a.region=b.region and a.runTimestamp = b.runTimestamp
+		when matched then
+			update set ErrorMessage = b.errMsg, success_flag = b.success_flag
+		WHEN NOT MATCHED THEN	
+			insert (step,utcTimeStamp,region, runTimestamp,success_flag,errorMessage)
+			values (b.step,b.utcTimeStamp,b.region, b.runTimestamp,b.success_flag,b.errMsg);
+	END CATCH;	 
 END;
 GO
 
@@ -507,7 +592,7 @@ BEGIN
 	DECLARE @queryStr VARCHAR(max)
 	set @queryStr = concat('select * from inputAllfeatures where region=''',  @region, ''' and utcTimestamp < ''',  @scoreStartTime , '''')
 
-	INSERT INTO @ModelTable EXEC usp_trainModel @queryStr = @queryStr,@server=@server, @database=@database, @user=@user, @pwd=@pwd
+	INSERT INTO @ModelTable EXEC usp_trainModel @queryStr = @queryStr,@region=@region,@scoreStartTime=@scoreStartTime, @server=@server, @database=@database, @user=@user, @pwd=@pwd
 
 	Merge Model as target
 		USING (select @region as region,model from @ModelTable) as source
@@ -526,18 +611,40 @@ CREATE PROCEDURE [dbo].[usp_predictDemand]
 AS
 BEGIN
 	DECLARE @regForestModel varbinary(max) = (SELECT TOP 1 model FROM Model where region=@region and startTime=@startTime);
-	EXEC sp_execute_external_script @language = N'R',
-                                  @script = N'
-									mod <- unserialize(as.raw(model));
-									print(summary(mod))
-									OutputDataSet<-rxPredict(modelObject = mod, data = InputDataSet, outData = NULL, 
-									type = "response", extraVarsToWrite=c("utcTimestamp"), overwrite = TRUE);
-									str(OutputDataSet)
-									print(OutputDataSet)',
-                                  @input_data_1 = @queryStr,
-								  @params = N'@model varbinary(max)',
-                                  @model = @regForestModel
-	WITH RESULT SETS ((Load_Pred float, utcTimestamp NVARCHAR(50)));
+
+	BEGIN TRY
+		EXEC sp_execute_external_script @language = N'R',
+									  @script = N'
+										mod <- unserialize(as.raw(model));
+										print(summary(mod))
+										OutputDataSet<-rxPredict(modelObject = mod, data = InputDataSet, outData = NULL, 
+										type = "response", extraVarsToWrite=c("utcTimestamp"), overwrite = TRUE);
+										str(OutputDataSet)
+										print(OutputDataSet)',
+									  @input_data_1 = @queryStr,
+									  @params = N'@model varbinary(max)',
+									  @model = @regForestModel
+		WITH RESULT SETS ((Load_Pred float, utcTimestamp NVARCHAR(50)));
+	
+		merge runlogs a 
+		using (select 3 as step, @startTime as utcTimeStamp, @region as region, getutcdate() as runtimestamp, 0 as success_flag, '' as errMsg) b
+		on a.step = b.step and a.utcTimeStamp = b.utcTimeStamp and a.region=b.region and a.runTimestamp = b.runTimestamp
+		when matched then
+			update set ErrorMessage = b.errMsg, success_flag = b.success_flag
+		WHEN NOT MATCHED THEN	
+			insert (step,utcTimeStamp,region, runTimestamp,success_flag,errorMessage)
+			values (b.step,b.utcTimeStamp,b.region, b.runTimestamp,b.success_flag,b.errMsg);	
+	END TRY
+	BEGIN CATCH
+		merge runlogs a 
+		using (select 3 as step, @startTime as utcTimeStamp, @region as region, getutcdate() as runtimestamp, -1 as success_flag, ERROR_MESSAGE() as errMsg) b
+		on a.step = b.step and a.utcTimeStamp = b.utcTimeStamp and a.region=b.region and a.runTimestamp = b.runTimestamp
+		when matched then
+			update set ErrorMessage = b.errMsg, success_flag = b.success_flag
+		WHEN NOT MATCHED THEN	
+			insert (step,utcTimeStamp,region, runTimestamp,success_flag,errorMessage)
+			values (b.step,b.utcTimeStamp,b.region, b.runTimestamp,b.success_flag,b.errMsg);
+	END CATCH;		
 END;
 GO
 
@@ -775,5 +882,20 @@ Begin
 END;
 GO
 
+insert into RegionLookup values(61752,'WEST',42.882002,-78.823471);
+insert into RegionLookup values(61753,'GENESE',43.196166,-77.018967);
+insert into RegionLookup values(61754,'CENTRL',42.443728,-76.758041);
+insert into RegionLookup values(61755,'NORTH',44.671583,-73.515701);
+insert into RegionLookup values(61756,'MHK VL',43.836508,-75.466461);
+insert into RegionLookup values(61757,'CAPITL',43.09998,-73.795853);
+insert into RegionLookup values(61758,'HUD VL',41.772336,-73.97541);
+insert into RegionLookup values(61759,'MILLWD',41.258711,-73.797569);
+insert into RegionLookup values(61760,'DUNWOD',41.075469,-73.818684);
+insert into RegionLookup values(61761,'N.Y.C.',40.78834,-73.951378);
+insert into RegionLookup values(61762,'LONGIL',40.776382,-73.227997);
+
+insert into stepLookup values(1,'FeaturEngineering');
+insert into stepLookup values(2,'Training');
+insert into stepLookup values(3,'Predicting');
 
 
