@@ -322,7 +322,7 @@ AS
 BEGIN
 	DECLARE @InputAllFeaturesTable NVARCHAR(50);
 	DECLARE @numTS bigint;
-	SET @numTS= cast(datediff(minute,@startTime,@endTime) as bigint);
+	SET @numTS= cast(datediff(minute,@startTime,@scoreEndTime) as bigint);
 
 	DECLARE @InputData TABLE (
 		utcTimestamp 	DATETIME,
@@ -574,7 +574,7 @@ BEGIN
 	load float,
 	utcTimestamp varchar(50))
 
-	DECLARE @predictQuery NVARCHAR(MAX) = concat('select * from inputAllfeatures where region=''',  @region, ''' and utcTimestamp > ''',  @scoreStartTime , '''')
+	DECLARE @predictQuery NVARCHAR(MAX) = concat('select * from inputAllfeatures where region=''',  @region, ''' and utcTimestamp >= ''',  @scoreStartTime , '''')
 
 	INSERT INTO @tmpTable EXEC usp_predictDemand @querystr = @predictQuery, @region=@region, @startTime=@scoreStartTime;
 					
