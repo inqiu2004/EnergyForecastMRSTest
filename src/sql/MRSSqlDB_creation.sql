@@ -595,8 +595,8 @@ BEGIN
 	INSERT INTO @ModelTable EXEC usp_trainModel @queryStr = @queryStr,@region=@region,@scoreStartTime=@scoreStartTime, @server=@server, @database=@database, @user=@user, @pwd=@pwd
 
 	Merge Model as target
-		USING (select @region as region,model from @ModelTable) as source
-	on target.region = source.region
+		USING (select @region as region,model, scoreStartTime as startTime from @ModelTable) as source
+	on target.region = source.region and target.startTime = source.startTime
 	WHEN MATCHED THEN 
 		UPDATE SET target.model= source.model
 	WHEN NOT MATCHED THEN
